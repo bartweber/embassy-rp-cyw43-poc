@@ -5,8 +5,6 @@
 #![no_main]
 #![allow(async_fn_in_trait)]
 
-use core::str::from_utf8;
-
 use cyw43_pio::PioSpi;
 use defmt::*;
 use embassy_executor::Spawner;
@@ -21,6 +19,7 @@ use embedded_io_async::Write;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 use build_const::build_const;
+use protocol::{Message, ParseResult};
 
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
@@ -146,12 +145,29 @@ async fn main(spawner: Spawner) {
                 }
             };
 
-            info!("rxd {}", from_utf8(&buf[..n]).unwrap());
+            let parse_result: ParseResult = protocol::parse(&buf[..n]);
+            match parse_result {
+                ParseResult::HeaderInvalid => {
+                    warn!("Header invalid");
+                    continue;
+                }
+                ParseResult::Need(n) => {
+                    warn!("Need more data: {}", n);
+                    continue;
+                }
+                ParseResult::DataInvalid => {
+                    warn!("Data invalid");
+                    continue;
+                }
+                ParseResult::Found(msg) => {
+                    info!("Received message: {:?}", msg);
+                }
+            }
 
-            let response = "Pong!";
-            match socket.write_all(response.as_bytes()).await {
+            let message = protocol::wrap_msg(Message::Pong { id: 1 }).expect("Unable to wrap message");
+            match socket.write_all(message.as_slice()).await {
                 Ok(()) => {
-                    info!("txd {}", response);
+                    info!("Response sent!");
                 }
                 Err(e) => {
                     warn!("write error: {:?}", e);

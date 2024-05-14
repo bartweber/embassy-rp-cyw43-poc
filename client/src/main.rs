@@ -1,7 +1,8 @@
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpStream};
 use std::io::Read;
 use std::io::Write;
-use log::info;
+use log::{info, warn};
+use protocol::{Message, ParseResult};
 
 fn main() {
     env_logger::init();
@@ -10,11 +11,32 @@ fn main() {
     info!("Connection established!");
 
     loop {
-        stream.write(b"Ping!").unwrap();
-        info!("Request: Ping!");
+        // send a ping message
+        let postcard = protocol::wrap_msg(Message::Ping { id: 1 }).expect("Unable to wrap message");
+        stream.write(postcard.as_slice()).unwrap();
+        info!("Request: {:?}", postcard);
+
+        // read the response
         let mut buffer = [0; 1024];
         stream.read(&mut buffer).unwrap();
-        info!("Response: {}", String::from_utf8_lossy(&buffer));
+        let parse_result: ParseResult = protocol::parse(&buffer);
+        match parse_result {
+            ParseResult::HeaderInvalid => {
+                warn!("Header invalid");
+                continue;
+            }
+            ParseResult::Need(n) => {
+                warn!("Need more data: {}", n);
+                continue;
+            }
+            ParseResult::DataInvalid => {
+                warn!("Data invalid");
+                continue;
+            }
+            ParseResult::Found(msg) => {
+                info!("Received message: {:?}", msg);
+            }
+        }
 
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
